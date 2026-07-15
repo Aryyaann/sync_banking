@@ -1,23 +1,25 @@
-from fastapi import FastAPI, HTTPException, Header, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import re
 import io
-from sync_engine import sync_negocio, DATABASE_URL
 import os
+from sync_engine import sync_negocio, DATABASE_URL
+from auth import verify_password, create_access_token, get_current_user
 
 app = FastAPI()
-# API_TOKEN = "DyWwx4k1dIKHW_7pjk4diIEpHxE6JcTtNjvM_JoWflw"  # el mismo que ya usas
-API_TOKEN = os.environ.get("API_TOKEN", "DyWwx4k1dIKHW_7pjk4diIEpHxE6JcTtNjvM_JoWflw")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # ajustaremos esto al dominio real del frontend más adelante
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 engine = create_engine(DATABASE_URL)
-
-
-def check_auth(authorization):
-    if authorization != f"Bearer {API_TOKEN}":
-        raise HTTPException(status_code=401, detail="No autorizado")
 
 
 @app.get("/status")
@@ -25,29 +27,47 @@ def status():
     return {"status": "vivo"}
 
 
+@app.post("/auth/login")
+def login(email: str = Query(...), password: str = Query(...)):
+    with engine.connect() as conn:
+        user = conn.execute(text("""
+            SELECT id, business_id, password_hash FROM users WHERE email = :email
+        """), {"email": email}).mappings().first()
+
+    if not user or not verify_password(password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
+
+    token = create_access_token(str(user["id"]), str(user["business_id"]))
+    return {"access_token": token}
+
+
 @app.get("/transactions")
-def get_transactions(business_id: str = Query(...), authorization: str = Header(None)):
-    check_auth(authorization)
+def get_transactions(current_user=Depends(get_current_user)):
     with engine.connect() as conn:
         rows = conn.execute(text("""
             SELECT fecha, importe, moneda, tipo, contraparte, iban_contraparte,
                    concepto_banco, concepto_detallado, categoria, referencia
             FROM transactions WHERE business_id = :bid ORDER BY fecha DESC
-        """), {"bid": business_id}).mappings().all()
+        """), {"bid": current_user["business_id"]}).mappings().all()
     return {"count": len(rows), "transactions": [dict(r) for r in rows]}
 
 
 @app.post("/sync")
-def trigger_sync(business_id: str = Query(...), bank_connection_id: str = Query(...),
-                  authorization: str = Header(None)):
-    check_auth(authorization)
-    resultado = sync_negocio(business_id, bank_connection_id)
+def trigger_sync(current_user=Depends(get_current_user)):
+    with engine.connect() as conn:
+        conexion = conn.execute(text("""
+            SELECT id FROM bank_connections WHERE business_id = :bid AND active = true LIMIT 1
+        """), {"bid": current_user["business_id"]}).mappings().first()
+
+    if not conexion:
+        raise HTTPException(status_code=404, detail="No hay conexión bancaria activa")
+
+    resultado = sync_negocio(current_user["business_id"], str(conexion["id"]))
     return resultado
 
 
 @app.get("/transactions/export")
-def export_excel(business_id: str = Query(...), authorization: str = Header(None)):
-    check_auth(authorization)
+def export_excel(current_user=Depends(get_current_user)):
     import pandas as pd
 
     with engine.connect() as conn:
@@ -55,7 +75,7 @@ def export_excel(business_id: str = Query(...), authorization: str = Header(None
             SELECT fecha, tipo, importe, moneda, contraparte, concepto_detallado,
                    concepto_banco, categoria, iban_contraparte, referencia
             FROM transactions WHERE business_id = :bid ORDER BY fecha
-        """), conn, params={"bid": business_id})
+        """), conn, params={"bid": current_user["business_id"]})
 
     if df.empty:
         raise HTTPException(status_code=404, detail="No hay movimientos para este negocio")
@@ -79,7 +99,6 @@ def export_excel(business_id: str = Query(...), authorization: str = Header(None
             c = ws.cell(row=1, column=col)
             c.fill, c.font, c.border = HEADER_FILL, HEADER_FONT, BORDE
             c.alignment = Alignment(horizontal="center", vertical="center")
-
         for _, row in data.iterrows():
             ws.append([row.get(c) for c in COLUMNAS])
             r = ws.max_row
@@ -92,7 +111,6 @@ def export_excel(business_id: str = Query(...), authorization: str = Header(None
                 cell.fill = fill
                 if COLUMNAS[col - 1] == "importe":
                     cell.number_format = '#,##0.00 €;[RED]-#,##0.00 €'
-
         for col in range(1, len(COLUMNAS) + 1):
             letra = get_column_letter(col)
             max_len = max([len(str(ws.cell(row=r, column=col).value or "")) for r in range(1, ws.max_row + 1)], default=10)
