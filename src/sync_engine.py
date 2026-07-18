@@ -12,15 +12,20 @@ PRIVATE_KEY_PATH = "C:/Users/AryanHareshNarwaniDa/private_prod.key"
 engine = create_engine(DATABASE_URL)
 
 
-def cargar_private_key():
-    key_env = os.environ.get("SABADELL_PRIVATE_KEY")
+def cargar_private_key(env_var_name):
+    key_env = os.environ.get(env_var_name)
     if key_env:
         key_env = key_env.strip().replace("\\n", "\n").replace("\r\n", "\n")
         return key_env.encode()
-    return open(PRIVATE_KEY_PATH, "rb").read()
+    # Fallback local para pruebas (ajusta la ruta si trabajas en local)
+    local_path = f"./{env_var_name}.key"
+    if os.path.exists(local_path):
+        return open(local_path, "rb").read()
+    raise ValueError(f"No se encontró la clave privada en la variable de entorno '{env_var_name}'")
 
-def generar_jwt(application_id):
-    private_key = cargar_private_key()
+
+def generar_jwt(application_id, private_key_env_var):
+    private_key = cargar_private_key(private_key_env_var)
     iat = int(datetime.now().timestamp())
     jwt_body = {"iss": "enablebanking.com", "aud": "api.enablebanking.com", "iat": iat, "exp": iat + 3600}
     return pyjwt.encode(jwt_body, private_key, algorithm="RS256", headers={"kid": application_id})
@@ -29,7 +34,7 @@ def generar_jwt(application_id):
 def sync_negocio(business_id, bank_connection_id):
     with engine.begin() as conn:
         conexion = conn.execute(text("""
-            SELECT application_id, account_uid, session_id, consent_valid_until
+            SELECT application_id, account_uid, session_id, consent_valid_until, private_key_env_var, bank_name
             FROM bank_connections WHERE id = :id AND business_id = :bid AND active = true
         """), {"id": bank_connection_id, "bid": business_id}).mappings().first()
 
@@ -39,7 +44,7 @@ def sync_negocio(business_id, bank_connection_id):
         dias_restantes = (conexion["consent_valid_until"] - datetime.now(conexion["consent_valid_until"].tzinfo)).days
         aviso = f"El consentimiento caduca en {dias_restantes} días." if dias_restantes <= 10 else None
 
-        headers = {"Authorization": f"Bearer {generar_jwt(conexion['application_id'])}"}
+        headers = {"Authorization": f"Bearer {generar_jwt(conexion['application_id'], conexion['private_key_env_var'])}"}
 
         r = requests.get(
             f"https://api.enablebanking.com/accounts/{conexion['account_uid']}/transactions",
