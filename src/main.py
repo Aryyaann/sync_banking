@@ -14,7 +14,7 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # ajustaremos esto al dominio real del frontend más adelante
+    allow_origins=["https://sync-banking-frontend.vercel.app"], 
     allow_methods=["*"],
     allow_headers=["*"],
 )
