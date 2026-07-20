@@ -104,3 +104,13 @@ Algunos sandboxes de banco solo simulan el flujo técnico (autenticación, autor
 Sin `CORSMiddleware` configurado, o con el origen equivocado, el navegador rechaza las peticiones desde un dominio distinto al de la API.
 - **Solución de desarrollo**: `allow_origins=["*"]` mientras se prueba en local.
 - **Solución de producción**: restringir a la URL real del frontend desplegado (`allow_origins=["https://tu-dominio.vercel.app"]`) en cuanto se conozca.
+
+### `401 - CLOSED_SESSION` tras renovar el consentimiento
+Al rehacer el flujo de autorización (ej. para renovar antes de que caduque, o porque la sesión se cerró), Enable Banking puede asignar un **`account_uid` nuevo**, no solo un `session_id` nuevo — son independientes.
+- **Síntoma**: se actualiza `session_id` en `bank_connections` pero se sigue usando el `account_uid` antiguo → la API devuelve `CLOSED_SESSION` aunque la sesión nueva esté activa.
+- **Solución**: al renovar, revisar la respuesta completa de `get_session_prod.py` — actualizar en base de datos **tanto** `session_id` como `account_uid` (campo `uid` dentro de `accounts` en la respuesta), no solo el primero.
+```sql
+  UPDATE bank_connections 
+  SET session_id = 'NUEVO_SESSION_ID', account_uid = 'NUEVO_ACCOUNT_UID' 
+  WHERE business_id = '...' AND bank_name = '...';
+```
