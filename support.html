@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Centro de soporte personal</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b1220; color: #e8ecf3; max-width: 700px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 20px; }
+  select, input, button { font-size: 14px; padding: 10px; border-radius: 8px; border: 1px solid #223049; background: #121a2b; color: #e8ecf3; }
+  select, input { width: 100%; margin-bottom: 10px; box-sizing: border-box; }
+  button { background: #4f8cff; color: #0b1220; font-weight: 600; border: none; cursor: pointer; }
+  .msg { background: #121a2b; border: 1px solid #223049; border-radius: 8px; padding: 14px; margin-top: 16px; white-space: pre-wrap; }
+  .sources { color: #8896ac; font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Centro de soporte personal</h1>
+
+  <label>API URL</label>
+  <input id="apiUrl" value="https://web-production-a3366.up.railway.app">
+
+  <label>Token</label>
+  <input id="token" type="password" placeholder="Tu SUPPORT_TOKEN">
+
+  <label>Producto</label>
+  <select id="product"><option>sync-banking</option></select>
+
+  <label>Pregunta</label>
+  <input id="question" placeholder="¿Cómo añado un banco nuevo?">
+  <button onclick="preguntar()">Preguntar</button>
+
+  <div id="resultado"></div>
+
+  <script>
+    async function preguntar() {
+      const apiUrl = document.getElementById('apiUrl').value;
+      const token = document.getElementById('token').value;
+      const product = document.getElementById('product').value;
+      const question = document.getElementById('question').value;
+      const resultado = document.getElementById('resultado');
+      resultado.innerHTML = '<div class="msg">Pensando...</div>';
+
+      const res = await fetch(`${apiUrl}/support/ask?product=${encodeURIComponent(product)}&question=${encodeURIComponent(question)}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        resultado.innerHTML = `<div class="msg">Error: ${data.detail}</div>`;
+        return;
+      }
+
+      resultado.innerHTML = `<div class="msg">${data.answer}</div><div class="sources">Fuentes: ${data.sources.join(', ')}</div>`;
+    }
+  </script>
+</body>
+</html>
