@@ -9,12 +9,24 @@ import io
 import os
 from sync_engine import sync_negocio, DATABASE_URL
 from auth import verify_password, create_access_token, get_current_user
+from sentence_transformers import SentenceTransformer
+from anthropic import Anthropic
+import numpy as np
+from fastapi import FastAPI, HTTPException, Query, Response, Depends, Header
+
+support_model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+anthropic_client = Anthropic()
+SUPPORT_TOKEN = os.environ.get("SUPPORT_TOKEN", "WpYQaqZmChnenDJ5N1d9bOURG0gUoTt_")
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://sync-banking-frontend.vercel.app"], 
+    allow_origins=[
+        "https://sync-banking-frontend.vercel.app",  # dashboard de clientes
+        "http://127.0.0.1:5500",  # tu herramienta de soporte personal (Live Server)
+        "http://localhost:5500",
+    ],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -64,6 +76,60 @@ def trigger_sync(current_user=Depends(get_current_user)):
 
     resultado = sync_negocio(current_user["business_id"], str(conexion["id"]))
     return resultado
+
+@app.get("/support/products")
+def support_products(authorization: str = Header(None)):
+    if authorization != f"Bearer {SUPPORT_TOKEN}":
+        raise HTTPException(status_code=401, detail="No autorizado")
+    with engine.connect() as conn:
+        rows = conn.execute(text("SELECT DISTINCT product FROM support_chunks ORDER BY product")).fetchall()
+    return {"products": [r[0] for r in rows]}
+
+
+@app.post("/support/ask")
+def support_ask(product: str = Query(...), question: str = Query(...), authorization: str = Header(None)):
+    if authorization != f"Bearer {SUPPORT_TOKEN}":
+        raise HTTPException(status_code=401, detail="No autorizado")
+
+    pregunta_emb = support_model.encode([question])[0]
+
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT source_file, chunk_text, embedding FROM support_chunks WHERE product = :product
+        """), {"product": product}).mappings().all()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail=f"No hay documentación indexada para '{product}'")
+
+    similitudes = []
+    for row in rows:
+        emb = np.array(row["embedding"])
+        sim = np.dot(pregunta_emb, emb) / (np.linalg.norm(pregunta_emb) * np.linalg.norm(emb))
+        similitudes.append((sim, row["source_file"], row["chunk_text"]))
+    similitudes.sort(key=lambda x: x[0], reverse=True)
+    relevantes = similitudes[:5]
+
+    contexto = "\n\n---\n\n".join(f"[Fuente: {f}]\n{t}" for _, f, t in relevantes)
+
+    prompt = f"""Eres el centro de soporte interno del producto "{product}". Responde basándote EXCLUSIVAMENTE en el contexto. Si no está la respuesta, dilo.
+
+CONTEXTO:
+{contexto}
+
+PREGUNTA: {question}
+
+Responde en español, directo y práctico, citando el archivo fuente."""
+
+    response = anthropic_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=800,
+        messages=[{"role": "user", "content": prompt}],
+    )
+
+    return {
+        "answer": response.content[0].text,
+        "sources": list(set(f for _, f, _ in relevantes)),
+    }
 
 
 @app.get("/transactions/export")
