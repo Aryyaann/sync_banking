@@ -1,7 +1,7 @@
 import jwt as pyjwt
 import requests
-from datetime import datetime
-from pprint import pprint
+import uuid
+from datetime import datetime, timezone, timedelta
 
 APPLICATION_ID = "2127b315-5688-4f72-993b-f1258f136a8d"
 PRIVATE_KEY_PATH = "C:/Users/perso/private_business.key"
@@ -25,17 +25,19 @@ jwt_token = pyjwt.encode(
 
 base_headers = {"Authorization": f"Bearer {jwt_token}"}
 
-CODE = "d4b62a26-4804-42df-8c77-c127a64eadf0"
+body = {
+    "access": {
+        "valid_until": (datetime.now(timezone.utc) + timedelta(days=10)).isoformat()
+    },
+    "aspsp": {"name": "Banco de Sabadell", "country": "ES"},
+    "state": str(uuid.uuid4()),
+    "redirect_url": "https://aryannarwani.com/callback",
+    "psu_type": "business",
+}
 
-r = requests.post(
-    "https://api.enablebanking.com/sessions",
-    json={"code": CODE},
-    headers=base_headers,
-)
-
+r = requests.post("https://api.enablebanking.com/auth", json=body, headers=base_headers)
 if r.status_code == 200:
-    session = r.json()
-    print("Sesión creada correctamente:")
-    pprint(session)
+    auth_url = r.json()["url"]
+    print(f"Abre esta URL en el navegador:\n{auth_url}")
 else:
     print(f"Error {r.status_code}:", r.text)

@@ -6,11 +6,13 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 from auth import hash_password
 
-DATABASE_URL = "postgresql://postgres:MJxAMgWBOtQPpefwPUqvwgvPyaePcpnG@kodama.proxy.rlwy.net:50752/railway"
-BUSINESS_ID = "160a1f57-26d2-497f-a190-1219f0da11e0"
+DATABASE_URL = "postgresql://postgres:sync2026testXYZ@kodama.proxy.rlwy.net:50752/railway"
+BUSINESS_ID = "9c47c269-62f5-41f8-9f8b-b6b6e65d5076"
 
-EMAIL = "PON_AQUI_TU_EMAIL_REAL"
-PASSWORD = "ElígeUnaContraseñaSegura123"
+EMAIL = "hnarwani8@gmail.com"
+PASSWORD = "sync2026testXYZ"
+
+print(f"[debug] DATABASE_URL = {repr(DATABASE_URL)}")
 
 engine = create_engine(DATABASE_URL)
 with engine.begin() as conn:
